@@ -1,6 +1,6 @@
 from django.db import models
 from users.models import User
-import datetime
+from django.utils import timezone
 
 class Subscription(models.Model):
     STATUS_CHOICES = [
@@ -15,9 +15,10 @@ class Subscription(models.Model):
     session_id = models.CharField(max_length=255, blank=True, null=True)
     plan_id = models.CharField(max_length=100)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="Pending")
-    start_date = models.DateTimeField(default=datetime.datetime.now())
+    start_date = models.DateTimeField()
     expiry_date = models.DateTimeField()
     refund_id = models.CharField(max_length=100, blank=True, null=True) 
+    payment_token=models.CharField(max_length=50, blank=True, null=True)
 
  
 

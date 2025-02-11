@@ -45,7 +45,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'users',
     'profiles',
-    'subscriptions'
+    'subscriptions',
+    'cart',
+    'marketplace'
 ]
 
 MIDDLEWARE = [
@@ -209,4 +211,7 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ],
 }
+
+USE_TZ = False
+
 
