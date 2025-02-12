@@ -41,5 +41,11 @@ class SubscriptionContext:
             return self.payment_client.excute_subscription(request)
         else:
             return {"error":"Payment Client Not Initialized"}
+        
+    def subscription_webhook(self,request):
+        if self.payment_client:
+            return self.payment_client.subscription_webhook(request)
+        else:
+            return {"error":"Payment Client Not Initialized"}
 
   

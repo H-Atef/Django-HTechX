@@ -1,4 +1,5 @@
 from django.db import models
+from users.models import User
 
 class Product(models.Model):
     product_model = models.CharField(max_length=100,default="-")
@@ -10,6 +11,7 @@ class Product(models.Model):
     product_specifications = models.CharField(max_length=255,default="-")
     product_deal_link = models.URLField(blank=True, null=True)
     is_available=models.BooleanField(default=True)
+    product_provider=models.ForeignKey(User,on_delete=models.CASCADE)
 
     def __str__(self):
         return self.product_model

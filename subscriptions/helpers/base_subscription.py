@@ -14,7 +14,10 @@ class BaseClient(ABC):
     @abstractmethod
     def cancel_subscription(self,user):
         pass
-   
+    
+    @abstractmethod
+    def subscription_webhook(self,request):
+        pass
     
    
  

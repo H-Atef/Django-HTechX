@@ -8,6 +8,7 @@ from subscriptions.helpers.base_subscription import BaseClient
 from urllib.parse import urlparse, parse_qs
 from django.utils import timezone
 from profiles.models import Profile
+import requests
 
 
 paypalrestsdk.configure({
@@ -119,6 +120,8 @@ class PayPalClient(BaseClient):
                 expiry_date = timezone.now() + timedelta(days=30)
                 payment_token=self._extract_token(paypal_subscription.links[0].href)
 
+        
+
                 if subscription:
                     subscription.subscription_id = None
                     subscription.session_id='-'
@@ -131,6 +134,7 @@ class PayPalClient(BaseClient):
                     Subscription.objects.create(
                         user=user,
                         plan_id=billing_plan,
+                        start_date=timezone.now(),
                         session_id='-',
                         expiry_date=expiry_date,
                         payment_token=payment_token,
@@ -144,6 +148,16 @@ class PayPalClient(BaseClient):
                 return {"error": f"Failed to create PayPal subscription: {paypal_subscription.error}"}
         except Exception as e:
             return {"error": str(e)}
+        
+
+    def excute_subscription(self, request):
+        token=request.GET.get("token")
+        subscription = Subscription.objects.filter(payment_token=token).first()
+        response=paypalrestsdk.BillingAgreement.execute(token)
+        if response.success():
+            subscription.subscription_id=response.id
+            subscription.save()
+        return {"message":"Subscription excuted successfully!"}
 
     
 
@@ -168,9 +182,7 @@ class PayPalClient(BaseClient):
             profile=Profile.objects.filter(user=user).first()
 
             for transaction in transactions['agreement_transaction_list']:
-                print(transaction['status'])
                 if subscription.subscription_id==transaction['transaction_id'] and transaction['status']=='Created':
-                    print(transaction)
                     # Create a refund
                     refund = paypalrestsdk.Payout({
                     "sender_batch_header": {
@@ -190,15 +202,15 @@ class PayPalClient(BaseClient):
                 })
 
                     if refund.create():
-                                    # Find PayPal Billing Agreement
+                        refund_id=refund['batch_header']['payout_batch_id']
+                        # Find PayPal Billing Agreement
                         agreement = paypalrestsdk.BillingAgreement.find(subscription.subscription_id)
 
                         # Cancel the agreement
                         agreement.cancel({"note": "User requested cancellation."})
 
-                        # Update subscription status in the database
-                        subscription.status = "Cancelled"
                         subscription.expiry_date = timezone.now()
+                        subscription.refund_id=refund_id
                         subscription.save()
 
                         return {"message": "Subscription canceled and refunded successfully."}
@@ -211,14 +223,94 @@ class PayPalClient(BaseClient):
             return {"error": str(e)}
 
         
-    def excute_subscription(self, request):
-        token=request.GET.get("token")
-        subscription = Subscription.objects.filter(payment_token=token).first()
-        response=paypalrestsdk.BillingAgreement.execute(token)
-        if response.success():
-            if response.state=="Active":
-                subscription.status="Active"
-            subscription.subscription_id=response.id
-            subscription.save()
+  
 
-        return {"message":"excuted"}
+        
+    
+    def subscription_webhook(self, request):
+        try:
+            webhook_event = request.data
+            event_type = webhook_event.get("event_type")
+            resource = webhook_event.get("resource")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._get_paypal_access_token()}",
+            }
+            verification_payload = {
+                "auth_algo": request.headers.get("PAYPAL-AUTH-ALGO"),
+                "cert_url": request.headers.get("PAYPAL-CERT-URL"),
+                "transmission_id": request.headers.get("PAYPAL-TRANSMISSION-ID"),
+                "transmission_sig": request.headers.get("PAYPAL-TRANSMISSION-SIG"),
+                "transmission_time": request.headers.get("PAYPAL-TRANSMISSION-TIME"),
+                "webhook_id": settings.PAYPAL_SUBSCRIPTION_WEBHOOK_ID,
+                "webhook_event": webhook_event,
+            }
+            verify_response = requests.post("https://api.sandbox.paypal.com/v1/notifications/verify-webhook-signature", json=verification_payload, headers=headers)
+            verify_status = verify_response.json().get("verification_status")
+
+            if verify_status != "SUCCESS":
+                return {"error": "Invalid webhook signature."}
+            
+            # # Step 2: Process subscription-related events
+            subscription_id = resource.get("id")
+
+            subscription=None
+            
+               
+            if event_type=="BILLING.SUBSCRIPTION.ACTIVATED":
+                subscription = Subscription.objects.filter(subscription_id=subscription_id).first()
+                state=resource.get("status")
+                if subscription:
+                    if state=="ACTIVE":
+                        subscription.start_date=timezone.now()
+                        subscription.expiry_date=timezone.now() + timedelta(days=30)
+                        subscription.status="Active"
+                        subscription.save()
+
+            elif event_type == "BILLING.SUBSCRIPTION.EXPIRED":
+                subscription = Subscription.objects.filter(subscription_id=subscription_id).first()
+                if subscription:
+                    subscription.status = "Expired"
+                    subscription.expiry_date = timezone.now()  
+                    subscription.save()
+                        
+
+            elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
+                if subscription:
+                    subscription.status = "Cancelled"
+                    subscription.expiry_date = timezone.now()
+                    subscription.save()
+
+            
+            elif event_type == "PAYMENT.PAYOUTSBATCH.SUCCESS":
+                payout_id=resource["batch_header"]["payout_batch_id"]
+                payout = Subscription.objects.filter(refund_id=payout_id).first()
+                if payout:
+                    payout.status = "Cancelled & Refunded"
+                    payout.expiry_date = timezone.now()
+                    payout.save()
+
+            elif event_type == "PAYMENT.PAYOUTS-ITEM.SUCCEEDED":
+                payout_id=resource["payout_batch_id"]
+                print(payout_id)
+                payout = Subscription.objects.filter(refund_id=payout_id).first()
+                if payout:
+                    payout.status = "Cancelled & Refunded"
+                    payout.expiry_date = timezone.now()
+                    payout.save()
+
+            
+
+            return {"message": "Webhook received."}
+        except Exception as e:
+            return {"error": str(e)}
+        
+    def _get_paypal_access_token(self):
+        """Fetch PayPal Access Token"""
+        response = requests.post(
+            "https://api-m.sandbox.paypal.com/v1/oauth2/token",
+            auth=(settings.PAYPAL_CLIENT_ID, settings.PAYPAL_CLIENT_SECRET ),
+            data={"grant_type": "client_credentials"},
+        )
+        return response.json().get("access_token")

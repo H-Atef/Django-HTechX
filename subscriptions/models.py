@@ -8,13 +8,14 @@ class Subscription(models.Model):
         ("Active", "Active"),
         ("Cancelled", "Cancelled"),
         ("Expired", "Expired"),
+        ("Cancelled & Refunded","Cancelled & Refunded")
     ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="subscriptions")
     subscription_id = models.CharField(max_length=100, blank=True, null=True)
     session_id = models.CharField(max_length=255, blank=True, null=True)
     plan_id = models.CharField(max_length=100)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="Pending")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")
     start_date = models.DateTimeField()
     expiry_date = models.DateTimeField()
     refund_id = models.CharField(max_length=100, blank=True, null=True) 
